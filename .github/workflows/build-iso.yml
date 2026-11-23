@@ -1,0 +1,77 @@
+
+name: Build X-Console OS ISO
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: debian:bookworm
+
+    steps:
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          apt-get install -y \
+            live-build \
+            debootstrap \
+            debian-archive-keyring \
+            squashfs-tools \
+            xorriso \
+            ca-certificates \
+            curl \
+            wget \
+            unzip \
+            python3
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Extract X-Console OS source
+        run: |
+          mkdir -p source
+          unzip -q x-console-os-github-actions.zip -d source
+          test -f source/x-console-os/build.sh
+
+      - name: Configure Debian build
+        working-directory: source/x-console-os
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("build.sh")
+          s = p.read_text()
+          s = s.replace(
+              "lb config \\",
+              "lb config --mode debian \\",
+              1
+          )
+          s = s.replace(
+              '--archive-areas "main contrib non-free non-free-firmware" \\',
+              '--archive-areas "main contrib non-free non-free-firmware" \\\n'
+              '  --mirror-bootstrap https://deb.debian.org/debian \\\n'
+              '  --mirror-chroot https://deb.debian.org/debian \\\n'
+              '  --mirror-binary https://deb.debian.org/debian \\',
+              1
+          )
+          p.write_text(s)
+          PY
+          chmod +x build.sh
+
+      - name: Build bootable ISO
+        working-directory: source/x-console-os
+        run: |
+          ./build.sh
+
+      - name: Upload ISO
+        uses: actions/upload-artifact@v4
+        with:
+          name: x-console-os-iso
+          path: |
+            source/x-console-os/out/*.iso
+            source/x-console-os/out/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 7
